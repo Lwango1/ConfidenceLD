@@ -70,8 +70,8 @@ async function createUser(username, password, displayName) {
       "INSERT INTO users (username, display_name, salt, hash) VALUES ($1, $2, $3, $4) RETURNING id, username, display_name",
       [username, displayName, salt, hash]
     );
-    const { id, username, display_name } = res.rows[0];
-    return { id, username, displayName: display_name };
+    const { id, username: storedUsername, display_name } = res.rows[0];
+    return { id, username: storedUsername, displayName: display_name };
   } catch (err) {
     if (err.code === "23505") throw new Error("Ce username est déjà utilisé");
     throw err;

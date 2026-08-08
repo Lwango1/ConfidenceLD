@@ -1,0 +1,17 @@
+# Configuration Render (https://render.com) - déploiement 1 clic
+# Créez un compte gratuit, puis New > Blueprint et collez le lien de votre repo GitHub.
+services:
+  - type: web
+    name: confidenceld-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        sync: false        # à renseigner dans le dashboard Render
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_SSL
+        value: "true"

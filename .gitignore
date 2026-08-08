@@ -1,0 +1,24 @@
+# Dépendances
+node_modules/
+
+# Base de données et fichiers générés
+backend/*.db
+backend/uploads/
+backend/serverlog.txt
+backend/servererr.txt
+backend/test-sockets.js
+backend/.env
+
+# Fichiers de build
+**/build/
+confidence_app/build/
+confidence_app/.dart_tool/
+
+# Binaire APK partagée
+*.apk
+
+# OS / IDE
+.DS_STORE
+Thumbs.db
+.vscode/
+.idea/

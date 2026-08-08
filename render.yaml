@@ -5,9 +5,10 @@ services:
     name: confidenceld-backend
     runtime: node
     plan: free
+    rootDir: backend
     buildCommand: npm install
     startCommand: node src/server.js
-    healthCheckPath: /
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false        # à renseigner dans le dashboard Render

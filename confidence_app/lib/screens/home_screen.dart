@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/session.dart';
+import '../services/update_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,6 +19,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _load();
+    _checkUpdate();
+  }
+
+  Future<void> _checkUpdate() async {
+    try {
+      final info = await UpdateService.checkForUpdate();
+      if (info == null || !info.hasUpdate) return;
+      final current = await UpdateService.getCurrentVersion();
+      if (!UpdateService.isNewer(info.version, current)) return;
+      if (!mounted) return;
+      await UpdateService.showUpdateDialog(context, info);
+    } catch (_) {}
   }
 
   Future<void> _load() async {

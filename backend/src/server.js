@@ -67,6 +67,34 @@ app.post("/api/login", async (req, res) => {
   });
 });
 
+let versionCache = null;
+let versionCacheTime = 0;
+const GITHUB_REPO = "Lwango1/ConfidenceLD";
+
+app.get("/api/version", async (req, res) => {
+  try {
+    if (versionCache && Date.now() - versionCacheTime < 5 * 60 * 1000) {
+      return res.json(versionCache);
+    }
+    const gh = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!gh.ok) throw new Error("Aucune release GitHub");
+    const release = await gh.json();
+    const apkAsset = (release.assets || []).find((a) => a.name.endsWith(".apk"));
+    versionCache = {
+      version: release.tag_name,
+      apkUrl: apkAsset ? apkAsset.browser_download_url : null,
+      releaseNotes: release.body || "",
+      publishedAt: release.published_at || null,
+    };
+    versionCacheTime = Date.now();
+    res.json(versionCache);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/api/users", auth.middleware, (req, res) => {
   const users = db
     .getUsers()

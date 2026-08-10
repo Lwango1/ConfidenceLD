@@ -29,11 +29,16 @@ function createSockets(io, db, auth, config) {
 
     socket.on(
       "message:send",
-      async ({ toUserId, type, content, mediaId, viewOnce }, callback) => {
+      async ({ conversationId, toUserId, type, content, mediaId, viewOnce }, callback) => {
         try {
-          if (!toUserId) return callback && callback({ ok: false, error: "Destinataire manquant" });
-          let conv = await db.getConversationId(userId, toUserId);
-          if (!conv) conv = await db.createConversation(userId, toUserId);
+          let conv;
+          if (conversationId) {
+            conv = await getMemberConversation(conversationId, userId);
+          } else if (toUserId) {
+            conv = await db.getOrCreateDirectConversation(userId, toUserId);
+          } else {
+            return callback && callback({ ok: false, error: "Conversation ou destinataire manquant" });
+          }
           const msg = await db.addMessage({
             conversationId: conv.id,
             senderId: userId,
@@ -43,14 +48,34 @@ function createSockets(io, db, auth, config) {
             viewOnce: !!viewOnce,
           });
           const payload = await serializeMessage(msg, userId);
-          io.to(`user:${toUserId}`).emit("message:new", payload);
-          io.to(`user:${userId}`).emit("message:new", payload);
+          await emitToConversation(conv.id, "message:new", payload, userId);
+          await refreshUnread(conv.id, userId);
           if (callback) callback({ ok: true, message: payload });
         } catch (e) {
           if (callback) callback({ ok: false, error: e.message });
         }
       }
     );
+
+    socket.on("conversation:read", async ({ conversationId }, callback) => {
+      try {
+        await db.markAllRead(conversationId, userId);
+        io.to(`user:${userId}`).emit("conversation:read", { conversationId, userId });
+        if (callback) callback({ ok: true });
+      } catch (e) {
+        if (callback) callback({ ok: false });
+      }
+    });
+
+    socket.on("conversation:favorite", async ({ conversationId, isFavorite }, callback) => {
+      try {
+        await db.setFavorite(conversationId, userId, isFavorite);
+        io.to(`user:${userId}`).emit("conversation:favorite", { conversationId, isFavorite });
+        if (callback) callback({ ok: true });
+      } catch (e) {
+        if (callback) callback({ ok: false });
+      }
+    });
 
     socket.on("message:read", async ({ messageId }, callback) => {
       try {
@@ -82,6 +107,33 @@ function createSockets(io, db, auth, config) {
     });
   });
 
+  async function getMemberConversation(conversationId, userId) {
+    const members = await db.getGroupMembers(conversationId);
+    if (!members.some((m) => m.id === userId)) {
+      const err = new Error("Vous ne faites pas partie de cette conversation");
+      throw err;
+    }
+    return { id: conversationId };
+  }
+
+  async function emitToConversation(conversationId, event, payload, exceptUserId) {
+    const members = await db.getGroupMembers(conversationId);
+    const memberIds = members.map((m) => m.id);
+    for (const mid of memberIds) {
+      if (mid !== exceptUserId) io.to(`user:${mid}`).emit(event, payload);
+    }
+    io.to(`user:${exceptUserId}`).emit(event, payload);
+  }
+
+  async function refreshUnread(conversationId, senderId) {
+    const members = await db.getGroupMembers(conversationId);
+    for (const m of members) {
+      if (m.id === senderId) continue;
+      const count = await db.getUnreadCount(conversationId, m.id);
+      io.to(`user:${m.id}`).emit("conversation:unread", { conversationId, userId: m.id, count });
+    }
+  }
+
   async function serializeMessage(msg, viewerId) {
     let mediaUrl = null;
     let viewOnce = !!msg.view_once;
@@ -102,18 +154,17 @@ function createSockets(io, db, auth, config) {
       createdAt: msg.created_at,
     };
   }
-}
-
 async function socketGetConversations(userId) {
-  const users = await getUsersMap();
-  return db.getConversationsForUser(userId, users);
-}
+    const users = await getUsersMap();
+    return db.getConversationsForUser(userId, users);
+  }
 
-async function getUsersMap() {
-  const users = await require("./data").getUsers();
-  const map = {};
-  for (const u of users) map[u.id] = u;
-  return map;
+  async function getUsersMap() {
+    const users = await db.getUsers();
+    const map = {};
+    for (const u of users) map[u.id] = u;
+    return map;
+  }
 }
 
 module.exports = createSockets;

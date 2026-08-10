@@ -24,18 +24,46 @@ async function init() {
     id SERIAL PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
+    phone TEXT,
     salt TEXT NOT NULL,
     hash TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT`);
 
   await query(`CREATE TABLE IF NOT EXISTS conversations (
     id SERIAL PRIMARY KEY,
-    user1 INTEGER NOT NULL,
-    user2 INTEGER NOT NULL,
+    user1 INTEGER,
+    user2 INTEGER,
+    type TEXT NOT NULL DEFAULT 'direct',
+    name TEXT,
+    creator_id INTEGER,
     last_message_at TIMESTAMPTZ,
-    UNIQUE(user1, user2)
+    created_at TIMESTAMPTZ DEFAULT now()
   )`);
+
+  await query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'direct'`);
+  await query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS name TEXT`);
+  await query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS creator_id INTEGER`);
+  await query(`ALTER TABLE conversations ALTER COLUMN user1 DROP NOT NULL`);
+  await query(`ALTER TABLE conversations ALTER COLUMN user2 DROP NOT NULL`);
+
+  await query(`CREATE TABLE IF NOT EXISTS conversation_members (
+    conversation_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    is_favorite BOOLEAN NOT NULL DEFAULT false,
+    last_read_at TIMESTAMPTZ DEFAULT now(),
+    joined_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (conversation_id, user_id)
+  )`);
+
+  await query(`INSERT INTO conversation_members (conversation_id, user_id)
+    SELECT id, user1 FROM conversations WHERE type = 'direct' AND user1 IS NOT NULL
+    ON CONFLICT DO NOTHING`);
+  await query(`INSERT INTO conversation_members (conversation_id, user_id)
+    SELECT id, user2 FROM conversations WHERE type = 'direct' AND user2 IS NOT NULL
+    ON CONFLICT DO NOTHING`);
 
   await query(`CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
@@ -63,15 +91,24 @@ async function init() {
   console.log("Base de données PostgreSQL initialisée");
 }
 
-async function createUser(username, password, displayName) {
+async function normalizePhone(phone) {
+  let p = String(phone || "").replace(/[^\d+]/g, "");
+  if (p.startsWith("+")) return p;
+  if (p.startsWith("00")) return "+" + p.slice(2);
+  if (p.startsWith("0") && p.length >= 10) return "+243" + p.slice(1);
+  return p;
+}
+
+async function createUser(username, password, displayName, phone) {
   const { salt, hash } = auth.hashPassword(password);
+  const cleanPhone = await normalizePhone(phone);
   try {
     const res = await query(
-      "INSERT INTO users (username, display_name, salt, hash) VALUES ($1, $2, $3, $4) RETURNING id, username, display_name",
-      [username, displayName, salt, hash]
+      "INSERT INTO users (username, display_name, salt, hash, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, display_name, phone",
+      [username, displayName, salt, hash, cleanPhone]
     );
     const { id, username: storedUsername, display_name } = res.rows[0];
-    return { id, username: storedUsername, displayName: display_name };
+    return { id, username: storedUsername, displayName: display_name, phone: cleanPhone, avatar: null };
   } catch (err) {
     if (err.code === "23505") throw new Error("Ce username est déjà utilisé");
     throw err;
@@ -83,58 +120,208 @@ async function verifyUser(username, password) {
   const user = res.rows[0];
   if (!user) return null;
   if (!auth.verifyPassword(password, user.salt, user.hash)) return null;
-  return { id: user.id, username: user.username, displayName: user.display_name };
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.display_name,
+    phone: user.phone,
+    avatar: user.avatar,
+  };
 }
 
 async function getUsers() {
-  const res = await query("SELECT id, username, display_name as \"displayName\" FROM users");
+  const res = await query(
+    'SELECT id, username, display_name as "displayName", phone, avatar FROM users'
+  );
   return res.rows;
 }
 
-async function getConversationId(userA, userB) {
-  const a = Math.min(userA, userB);
-  const b = Math.max(userA, userB);
+async function setAvatar(userId, avatarPath) {
+  await query("UPDATE users SET avatar = $1 WHERE id = $2", [avatarPath, userId]);
+}
+
+async function getUserById(userId) {
   const res = await query(
-    "SELECT * FROM conversations WHERE user1 = $1 AND user2 = $2",
-    [a, b]
+    'SELECT id, username, display_name as "displayName", phone, avatar FROM users WHERE id = $1',
+    [userId]
+  );
+  return res.rows[0] || null;
+}
+
+async function matchContacts(phoneNumbers) {
+  const normalized = [];
+  for (const p of phoneNumbers) {
+    const n = await normalizePhone(p);
+    if (n && !normalized.includes(n)) normalized.push(n);
+  }
+  const stripped = normalized.map((n) => n.replace(/^\+/, ""));
+  const all = [...normalized, ...stripped];
+  if (all.length === 0) return [];
+  const placeholders = all.map((_, i) => `$${i + 1}`).join(",");
+  const res = await query(
+    `SELECT DISTINCT id, username, display_name as "displayName", phone, avatar FROM users WHERE phone IN (${placeholders})`,
+    all
+  );
+  return res.rows;
+}
+
+/* ============ CONVERSATIONS ============ */
+
+async function getDirectConversation(userA, userB) {
+  const res = await query(
+    `SELECT c.* FROM conversations c
+     JOIN conversation_members m1 ON m1.conversation_id = c.id AND m1.user_id = $1
+     JOIN conversation_members m2 ON m2.conversation_id = c.id AND m2.user_id = $2
+     WHERE c.type = 'direct'`,
+    [userA, userB]
+  );
+  return res.rows[0] || null;
+}
+
+async function createDirectConversation(userA, userB) {
+  const res = await query(
+    "INSERT INTO conversations (type) VALUES ('direct') RETURNING *"
+  );
+  const convId = res.rows[0].id;
+  await query(
+    "INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2), ($1, $3)",
+    [convId, userA, userB]
   );
   return res.rows[0];
 }
 
-async function createConversation(userA, userB) {
-  const a = Math.min(userA, userB);
-  const b = Math.max(userA, userB);
+async function getOrCreateDirectConversation(userA, userB) {
+  const existing = await getDirectConversation(userA, userB);
+  if (existing) return existing;
+  return createDirectConversation(userA, userB);
+}
+
+async function createGroup(name, creatorId, memberIds) {
   const res = await query(
-    "INSERT INTO conversations (user1, user2) VALUES ($1, $2) ON CONFLICT (user1, user2) DO UPDATE SET user1 = EXCLUDED.user1 RETURNING *",
-    [a, b]
+    "INSERT INTO conversations (type, name, creator_id) VALUES ('group', $1, $2) RETURNING *",
+    [name, creatorId]
   );
+  const convId = res.rows[0].id;
+  const allMembers = [...new Set([creatorId, ...memberIds])];
+  for (const uid of allMembers) {
+    await query(
+      "INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2)",
+      [convId, uid]
+    );
+  }
   return res.rows[0];
+}
+
+async function addGroupMember(conversationId, userId) {
+  await query(
+    "INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    [conversationId, userId]
+  );
+}
+
+async function getGroupMembers(conversationId) {
+  const res = await query(
+    `SELECT m.user_id as id, m.joined_at
+     FROM conversation_members m
+     WHERE m.conversation_id = $1`,
+    [conversationId]
+  );
+  return res.rows;
+}
+
+async function setFavorite(conversationId, userId, isFavorite) {
+  await query(
+    "UPDATE conversation_members SET is_favorite = $1 WHERE conversation_id = $2 AND user_id = $3",
+    [!!isFavorite, conversationId, userId]
+  );
 }
 
 async function getConversationsForUser(userId, usersById) {
   const res = await query(
-    "SELECT * FROM conversations WHERE user1 = $1 OR user2 = $2 ORDER BY last_message_at DESC",
-    [userId, userId]
+    `SELECT c.id, c.type, c.name, c.last_message_at,
+            m.is_favorite,
+            m.last_read_at
+     FROM conversations c
+     JOIN conversation_members m ON m.conversation_id = c.id
+     WHERE m.user_id = $1
+     ORDER BY c.last_message_at DESC NULLS LAST`,
+    [userId]
   );
-  return res.rows
-    .map((c) => {
-      const otherId = c.user1 === userId ? c.user2 : c.user1;
-      const other = usersById[otherId];
-      return {
-        id: c.id,
-        userId: otherId,
-        displayName: other ? other.displayName : "Utilisateur",
-        lastMessageAt: c.last_message_at,
-      };
-    })
-    .filter((c) => c.userId);
+  const conversations = [];
+  for (const c of res.rows) {
+    let displayName = null;
+    let avatar = null;
+    let otherUserId = null;
+    let memberCount = null;
+    if (c.type === "direct") {
+      const members = await getGroupMembers(c.id);
+      const other = members.find((m) => m.id !== userId);
+      if (other) {
+        otherUserId = other.id;
+        const u = usersById[other.id];
+        displayName = u ? u.displayName : "Utilisateur";
+        avatar = u ? u.avatar : null;
+      }
+    } else {
+      const members = await getGroupMembers(c.id);
+      memberCount = members.length;
+      displayName = c.name || "Groupe";
+    }
+    const unread = await getUnreadCount(c.id, userId);
+    const lastMessage = await getLastMessage(c.id);
+    conversations.push({
+      id: c.id,
+      type: c.type,
+      userId: otherUserId,
+      displayName,
+      avatar,
+      memberCount,
+      isFavorite: c.is_favorite,
+      unreadCount: unread,
+      lastMessage: lastMessage
+        ? { senderId: lastMessage.sender_id, content: lastMessage.content, type: lastMessage.type }
+        : null,
+      lastMessageAt: c.last_message_at,
+    });
+  }
+  return conversations;
 }
 
-async function getMessages(conversationId) {
-  const res = await query("SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at, id", [
-    conversationId,
-  ]);
-  return res.rows;
+async function getLastMessage(conversationId) {
+  const res = await query(
+    "SELECT sender_id, content, type FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+    [conversationId]
+  );
+  return res.rows[0] || null;
+}
+
+async function getUnreadCount(conversationId, userId) {
+  const res = await query(
+    `SELECT COUNT(*)::int as cnt FROM messages
+     WHERE conversation_id = $1 AND sender_id <> $2 AND created_at > (
+       SELECT COALESCE(last_read_at, '1970-01-01') FROM conversation_members
+       WHERE conversation_id = $1 AND user_id = $2
+     )`,
+    [conversationId, userId]
+  );
+  return res.rows[0].cnt;
+}
+
+async function getMessages(conversationId, userId, offset = 0) {
+  const res = await query(
+    "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 100 OFFSET $2",
+    [conversationId, offset]
+  );
+  const rows = res.rows.reverse();
+  if (userId) await markAllRead(conversationId, userId);
+  return rows;
+}
+
+async function markAllRead(conversationId, userId) {
+  await query(
+    "UPDATE conversation_members SET last_read_at = now() WHERE conversation_id = $1 AND user_id = $2",
+    [conversationId, userId]
+  );
 }
 
 async function addMessage({ conversationId, senderId, type, content, mediaId, viewOnce }) {
@@ -176,11 +363,19 @@ module.exports = {
   createUser,
   verifyUser,
   getUsers,
-  getConversationId,
-  createConversation,
+  matchContacts,
+  setAvatar,
+  getUserById,
+  getOrCreateDirectConversation,
+  createGroup,
+  addGroupMember,
+  getGroupMembers,
+  setFavorite,
   getConversationsForUser,
   getMessages,
   addMessage,
+  markAllRead,
+  getUnreadCount,
   markMessageRead,
   createMedia,
   getMedia,

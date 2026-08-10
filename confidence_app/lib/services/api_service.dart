@@ -20,6 +20,7 @@ class ApiService {
     required String username,
     required String password,
     required String displayName,
+    String? phone,
   }) async {
     final res = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/api/register'),
@@ -28,6 +29,7 @@ class ApiService {
         'username': username,
         'password': password,
         'displayName': displayName,
+        'phone': phone,
       }),
     );
     _handleError(res);
@@ -54,6 +56,60 @@ class ApiService {
     );
     _handleError(res);
     return jsonDecode(res.body) as List<dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> getConversations() async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/conversations'),
+      headers: _headers,
+    );
+    _handleError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> getMessages(int conversationId) async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/messages/$conversationId'),
+      headers: _headers,
+    );
+    _handleError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> createGroup({
+    required String name,
+    required List<int> memberIds,
+  }) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/groups'),
+      headers: _headers,
+      body: jsonEncode({'name': name, 'memberIds': memberIds}),
+    );
+    _handleError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> matchContacts(
+      List<String> phones) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/contacts/match'),
+      headers: _headers,
+      body: jsonEncode({'phones': phones}),
+    );
+    _handleError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<String?> uploadAvatar(String filePath) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/api/avatar');
+    final request = http.MultipartRequest('POST', uri);
+    request.headers['Authorization'] = 'Bearer ${token ?? ''}';
+    request.files.add(await http.MultipartFile.fromPath('avatar', filePath));
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    _handleError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return body['avatar'] as String?;
   }
 
   static Future<Map<String, dynamic>> uploadMedia({

@@ -18,7 +18,7 @@ class Message {
     required this.id,
     required this.conversationId,
     required this.senderId,
-    required this.type,
+    this.type = 'text',
     this.content,
     this.mediaId,
     this.mediaUrl,
@@ -58,6 +58,9 @@ class SocketService {
   final void Function(Message message) onMessage;
   final void Function(int messageId) onMessageRead;
   final void Function(int mediaId) onMediaDestroyed;
+  final void Function(int conversationId, int unreadCount)? onUnreadChange;
+  final void Function(int conversationId)? onConversationRead;
+  final void Function(int conversationId, bool isFavorite)? onFavoriteChange;
 
   io.Socket? _socket;
 
@@ -65,6 +68,9 @@ class SocketService {
     required this.onMessage,
     required this.onMessageRead,
     required this.onMediaDestroyed,
+    this.onUnreadChange,
+    this.onConversationRead,
+    this.onFavoriteChange,
   });
 
   void connect() {
@@ -93,19 +99,41 @@ class SocketService {
       final map = (data as Map).cast<String, dynamic>();
       onMediaDestroyed(map['mediaId'] as int);
     });
+    _socket!.on('conversation:unread', (data) {
+      final map = (data as Map).cast<String, dynamic>();
+      onUnreadChange?.call(
+        map['conversationId'] as int,
+        map['count'] as int? ?? 0,
+      );
+    });
+    _socket!.on('conversation:read', (data) {
+      final map = (data as Map).cast<String, dynamic>();
+      onConversationRead?.call(
+        map['conversationId'] as int,
+      );
+    });
+    _socket!.on('conversation:favorite', (data) {
+      final map = (data as Map).cast<String, dynamic>();
+      onFavoriteChange?.call(
+        map['conversationId'] as int,
+        map['isFavorite'] == true,
+      );
+    });
     _socket!.onDisconnect((_) => debugPrint('Socket déconnecté'));
     _socket!.connect();
   }
 
   void sendMessage({
-    required int toUserId,
+    int? conversationId,
+    int? toUserId,
     required String type,
     String? content,
     int? mediaId,
     bool viewOnce = false,
   }) {
     _socket?.emit('message:send', {
-      'toUserId': toUserId,
+      if (conversationId != null) 'conversationId': conversationId,
+      if (toUserId != null) 'toUserId': toUserId,
       'type': type,
       'content': content,
       'mediaId': mediaId,
@@ -115,6 +143,17 @@ class SocketService {
 
   void markRead(int messageId) {
     _socket?.emit('message:read', {'messageId': messageId});
+  }
+
+  void markConversationRead(int conversationId) {
+    _socket?.emit('conversation:read', {'conversationId': conversationId});
+  }
+
+  void setFavorite(int conversationId, bool isFavorite) {
+    _socket?.emit('conversation:favorite', {
+      'conversationId': conversationId,
+      'isFavorite': isFavorite,
+    });
   }
 
   void mediaViewed({required int mediaId, required int ownerId}) {

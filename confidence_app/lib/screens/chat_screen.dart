@@ -17,7 +17,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Message> _messages = [];
   bool _viewOnce = false;
 
-  int get _otherId => widget.otherUser['id'] as int;
+  int get _otherId => widget.otherUser['id'] as int? ?? 0;
+  int? get _conversationId => widget.otherUser['conversationId'] as int?;
 
   @override
   void initState() {
@@ -28,10 +29,34 @@ class _ChatScreenState extends State<ChatScreen> {
       onMediaDestroyed: (_) {},
     );
     _socket.connect();
+    final cid = _conversationId;
+    if (cid != null) {
+      _socket.markConversationRead(cid);
+    }
+    loadHistory();
+  }
+
+  Future<void> loadHistory() async {
+    final cid = _conversationId;
+    if (cid == null) return;
+    try {
+      final res = await ApiService.getMessages(cid);
+      if (!mounted) return;
+      final data = res['messages'] as List<dynamic>? ?? [];
+      setState(() {
+        _messages.clear();
+        _messages.addAll(data.map((m) => Message.fromJson((m as Map).cast<String, dynamic>())));
+      });
+    } catch (_) {}
   }
 
   void _handleIncoming(Message msg) {
-    if (msg.senderId == _otherId) {
+    if (_conversationId != null &&
+        msg.conversationId == _conversationId &&
+        msg.senderId != (ApiService.userId ?? 0)) {
+      if (!mounted) return;
+      setState(() => _messages.add(msg));
+    } else if (_conversationId == null && msg.senderId == _otherId) {
       if (!mounted) return;
       setState(() => _messages.add(msg));
     }
@@ -49,7 +74,14 @@ class _ChatScreenState extends State<ChatScreen> {
           viewOnce: _viewOnce,
         )));
     _textCtrl.clear();
-    _socket.sendMessage(toUserId: _otherId, type: 'text', content: text, viewOnce: _viewOnce);
+    final cid = _conversationId;
+    _socket.sendMessage(
+      conversationId: cid,
+      toUserId: cid == null ? _otherId : null,
+      type: 'text',
+      content: text,
+      viewOnce: _viewOnce,
+    );
   }
 
   Future<void> _sendMedia() async {
@@ -73,7 +105,8 @@ class _ChatScreenState extends State<ChatScreen> {
             viewOnce: _viewOnce,
           )));
       _socket.sendMessage(
-        toUserId: _otherId,
+        conversationId: _conversationId,
+        toUserId: _conversationId == null ? _otherId : null,
         type: 'media',
         mediaId: mediaId,
         viewOnce: _viewOnce,
@@ -137,13 +170,30 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             CircleAvatar(
               radius: 16,
-              child: Text(
-                (widget.otherUser['displayName'] as String? ?? '?').substring(0, 1).toUpperCase(),
-                style: const TextStyle(fontSize: 14),
-              ),
+              backgroundImage: (widget.otherUser['avatar'] as String?) != null
+                  ? NetworkImage('${ApiConfig.baseUrl}${widget.otherUser['avatar']}')
+                  : null,
+              child: (widget.otherUser['avatar'] as String?) != null
+                  ? null
+                  : Text(
+                      (widget.otherUser['displayName'] as String? ?? '?')
+                          .substring(0, 1)
+                          .toUpperCase(),
+                      style: const TextStyle(fontSize: 14),
+                    ),
             ),
             const SizedBox(width: 10),
-            Text(widget.otherUser['displayName'] as String? ?? ''),
+            Expanded(
+              child: Text(
+                widget.otherUser['displayName'] as String? ?? '',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (widget.otherUser['type'] == 'group')
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(Icons.group, size: 18),
+              ),
           ],
         ),
       ),

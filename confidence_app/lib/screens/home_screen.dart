@@ -11,9 +11,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final List<Map<String, dynamic>> _users = [];
-  final List<Map<String, dynamic>> _conversations = [];
+  List<Map<String, dynamic>> _conversations = [];
+  List<Map<String, dynamic>> _users = [];
   bool _loading = true;
+
+  int get _userId => ApiService.userId ?? 0;
 
   @override
   void initState() {
@@ -35,103 +37,343 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _load() async {
     try {
+      final convos = await ApiService.getConversations();
       final users = await ApiService.getUsers();
       if (mounted) {
         setState(() {
-          _users
-            ..clear()
-            ..addAll(users.cast<Map<String, dynamic>>());
+          _conversations = (convos['conversations'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+          _users = users.cast<Map<String, dynamic>>();
           _loading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  List<Map<String, dynamic>> _filter(String tab) {
+    switch (tab) {
+      case 'nonlues':
+        return _conversations.where((c) => (c['unreadCount'] ?? 0) > 0).toList();
+      case 'favoris':
+        return _conversations.where((c) => c['isFavorite'] == true).toList();
+      case 'groupes':
+        return _conversations.where((c) => c['type'] == 'group').toList();
+      default:
+        return _conversations;
+    }
+  }
+
+  void _openConversation(Map<String, dynamic> conv) {
+    Navigator.pushNamed(context, '/chat', arguments: {
+      'conversationId': conv['id'],
+      'type': conv['type'],
+      'displayName': conv['displayName'],
+      'avatar': conv['avatar'],
+      if (conv['userId'] != null) 'userId': conv['userId'],
+    });
+  }
+
+  void _newChat() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        builder: (ctx, scroll) {
+          final mine = _users.where((u) => u['id'] != _userId).toList();
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Nouvelle conversation',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _createGroup(ctx),
+                      child: const Text('Nouveau groupe'),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  controller: scroll,
+                  itemCount: mine.length,
+                  itemBuilder: (_, i) {
+                    final u = mine[i];
+                    return ListTile(
+                      leading: _Avatar(displayName: u['displayName'], avatar: u['avatar'], radius: 20),
+                      title: Text(u['displayName'] as String? ?? ''),
+                      subtitle: Text('@${u['username']}'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.pushNamed(context, '/chat', arguments: {
+                          'type': 'direct',
+                          'displayName': u['displayName'],
+                          'avatar': u['avatar'],
+                          'userId': u['id'],
+                        });
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _createGroup(BuildContext sheetCtx) async {
+    final selected = <int>{};
+    final mine = _users.where((u) => u['id'] != _userId).toList();
+    final nameCtrl = TextEditingController();
+    if (!mounted) return;
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (dlg) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text('Nouveau groupe'),
+          content: SizedBox(
+            width: 320,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Nom du groupe'),
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: mine.map((u) {
+                      final id = u['id'] as int;
+                      return CheckboxListTile(
+                        dense: true,
+                        title: Text(u['displayName'] as String? ?? ''),
+                        value: selected.contains(id),
+                        onChanged: (v) {
+                          setDlg(() {
+                            if (v == true) {
+                              selected.add(id);
+                            } else {
+                              selected.remove(id);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Créer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (created != true) return;
+    final name = nameCtrl.text.trim();
+    if (name.isEmpty || selected.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choisissez un nom et au moins un membre')),
+      );
+      return;
+    }
+    try {
+      await ApiService.createGroup(name: name, memberIds: selected.toList());
+      if (!mounted) return;
+      Navigator.pop(sheetCtx);
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur : $e')));
+    }
+  }
+
+  Widget _buildConversationRow(Map<String, dynamic> conv) {
+    final displayName = conv['displayName'] as String? ?? '';
+    final avatar = conv['avatar'];
+    final lastMsg = conv['lastMessage'] as Map<String, dynamic>?;
+    final unread = (conv['unreadCount'] as int? ?? 0);
+    final time = conv['lastMessageAt'] as String? ?? '';
+    final subtitle = lastMsg != null
+        ? (lastMsg['type'] == 'media' ? 'Photo' : lastMsg['content'] as String? ?? '')
+        : 'Aucun message';
+    return ListTile(
+      leading: _Avatar(displayName: displayName, avatar: avatar),
+      title: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (time.isNotEmpty)
+            Text(
+              _formatTime(time),
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          if (unread > 0)
+            Container(
+              margin: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: const BoxDecoration(
+                color: Color(0xFF25D366),
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$unread',
+                style: const TextStyle(fontSize: 11, color: Colors.white),
+              ),
+            ),
+        ],
+      ),
+      onTap: () => _openConversation(conv),
+    );
+  }
+
+  static String _formatTime(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      final now = DateTime.now();
+      if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
       }
+      return '${dt.day}/${dt.month}';
+    } catch (_) {
+      return '';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('ConfidenceLD'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) async {
-              if (v == 'logout') {
-                await Session.clear();
-                if (!mounted) return;
-                Navigator.of(context).pushReplacementNamed('/login');
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
-            ],
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(12),
-              children: [
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    'Nouvelle conversation',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                ..._users.map(_buildUser),
-                const Divider(height: 32),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    'Mes conversations',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                if (_conversations.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Aucune conversation. Choisissez un utilisateur pour commencer.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  )
-                else
-                  ..._conversations.map(_buildConversation),
+    return DefaultTabController(
+      length: 4,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('ConfidenceLD'),
+          actions: [
+            PopupMenuButton<String>(
+              onSelected: (v) async {
+                if (v == 'refresh') await _load();
+                if (v == 'logout') {
+                  await Session.clear();
+                  if (!mounted) return;
+                  Navigator.of(context).pushReplacementNamed('/login');
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'refresh', child: Text('Actualiser')),
+                PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
               ],
             ),
+            IconButton(
+              onPressed: _newChat,
+              icon: const Icon(Icons.edit_outlined),
+            ),
+          ],
+          bottom: const TabBar(
+            isScrollable: false,
+            tabs: [
+              Tab(text: 'Tous'),
+              Tab(text: 'Non lues'),
+              Tab(text: 'Favoris'),
+              Tab(text: 'Groupes'),
+            ],
+          ),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : TabBarView(
+                children: const [
+                  _FilterTab(key: ValueKey('tous'), tab: 'tous'),
+                  _FilterTab(key: ValueKey('nonlues'), tab: 'nonlues'),
+                  _FilterTab(key: ValueKey('favoris'), tab: 'favoris'),
+                  _FilterTab(key: ValueKey('groupes'), tab: 'groupes'),
+                ],
+              ),
+      ),
     );
   }
+}
 
-  Widget _buildUser(Map<String, dynamic> user) {
-    return ListTile(
-      leading: CircleAvatar(
-        child: Text((user['displayName'] as String? ?? '?').substring(0, 1).toUpperCase()),
-      ),
-      title: Text(user['displayName'] as String? ?? user['username']),
-      subtitle: Text('@${user['username']}'),
-      trailing: const Icon(Icons.chat_bubble_outline),
-      onTap: () => Navigator.pushNamed(context, '/chat', arguments: user),
-    );
+class _FilterTab extends StatelessWidget {
+  final String tab;
+  const _FilterTab({super.key, required this.tab});
+
+  @override
+  Widget build(BuildContext context) {
+    return Builder(builder: (ctx) {
+      // Parent state accessible via a static holder approach
+      final home = ctx.findAncestorStateOfType<_HomeScreenState>();
+      if (home == null) return const SizedBox.shrink();
+      final items = home._filter(tab);
+      if (items.isEmpty) {
+        return const Center(
+          child: Text(
+            'Aucune conversation',
+            style: TextStyle(color: Colors.grey),
+          ),
+        );
+      }
+      return RefreshIndicator(
+        onRefresh: () => home._load().then((_) {}),
+        child: ListView.separated(
+          physics: const AlwaysScrollableScrollPhysics(),
+          itemCount: items.length,
+          separatorBuilder: (_, __) => Divider(height: 1, indent: 72),
+          itemBuilder: (_, i) => home._buildConversationRow(items[i]),
+        ),
+      );
+    });
   }
+}
 
-  Widget _buildConversation(Map<String, dynamic> conv) {
-    return ListTile(
-      leading: CircleAvatar(
-        child: Text((conv['displayName'] as String? ?? '?').substring(0, 1).toUpperCase()),
-      ),
-      title: Text(conv['displayName'] as String? ?? ''),
-      subtitle: Text(conv['lastMessageAt']?.toString() ?? ''),
-      onTap: () => Navigator.pushNamed(context, '/chat', arguments: {
-        'id': conv['userId'],
-        'username': conv['displayName'],
-        'displayName': conv['displayName'],
-      }),
+class _Avatar extends StatelessWidget {
+  final Object? displayName;
+  final Object? avatar;
+  final double radius;
+  const _Avatar({this.displayName, this.avatar, this.radius = 22});
+
+  @override
+  Widget build(BuildContext context) {
+    final url = avatar as String?;
+    final initial = (displayName as String? ?? '?').substring(0, 1).toUpperCase();
+    if (url != null && url.isNotEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundImage: NetworkImage('${ApiConfig.baseUrl}$url'),
+        onBackgroundImageError: (_, __) {},
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      child: Text(initial, style: TextStyle(fontSize: radius * 0.8)),
     );
   }
 }

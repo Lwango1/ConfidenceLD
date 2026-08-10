@@ -139,7 +139,7 @@ function createSockets(io, db, auth, config) {
     let viewOnce = !!msg.view_once;
     if (msg.media_id) {
       const media = await db.getMedia(msg.media_id);
-      if (media && !viewOnce) mediaUrl = `/uploads/${media.filename}`;
+      if (media) mediaUrl = `/uploads/${media.filename}`;
     }
     return {
       id: msg.id,

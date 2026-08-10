@@ -141,14 +141,18 @@ app.post(
   "/api/upload",
   auth.middleware,
   upload.single("file"),
-  (req, res) => {
+  async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Fichier manquant" });
-    const media = db.createMedia(req.file.filename, req.file.mimetype, req.user.id);
-    res.json({
-      mediaId: media.id,
-      url: `/uploads/${media.filename}`,
-      mimeType: media.mimetype,
-    });
+    try {
+      const media = await db.createMedia(req.file.filename, req.file.mimetype, req.user.id);
+      res.json({
+        mediaId: media.id,
+        url: `/uploads/${media.filename}`,
+        mimeType: media.mimetype,
+      });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
   }
 );
 
@@ -188,7 +192,7 @@ app.get("/api/messages/:conversationId", auth.middleware, async (req, res) => {
     const full = [];
     for (const m of messages) {
       let mediaUrl = null;
-      if (m.media_id && !m.view_once) {
+      if (m.media_id) {
         const media = await db.getMedia(m.media_id);
         if (media) mediaUrl = `/uploads/${media.filename}`;
       }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/chat_screen.dart';
+import 'screens/contacts_screen.dart';
 import 'services/session.dart';
 
 Future<void> main() async {
@@ -30,6 +31,7 @@ class ConfidenceLDApp extends StatelessWidget {
       routes: {
         '/login': (_) => const LoginScreen(),
         '/home': (_) => const HomeScreen(),
+        '/contacts': (_) => const ContactsScreen(),
         '/chat': (_) => ChatScreen(otherUser: const {}),
       },
       onGenerateRoute: (settings) {

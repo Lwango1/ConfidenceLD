@@ -75,73 +75,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _newChat() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.7,
-        maxChildSize: 0.95,
-        builder: (ctx, scroll) {
-          final mine = _users.where((u) => u['id'] != _userId).toList();
-          return Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Nouvelle conversation',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => _createGroup(ctx),
-                      child: const Text('Nouveau groupe'),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-              ),
-              Divider(height: 1),
-              Expanded(
-                child: ListView.builder(
-                  controller: scroll,
-                  itemCount: mine.length,
-                  itemBuilder: (_, i) {
-                    final u = mine[i];
-                    return ListTile(
-                      leading: _Avatar(displayName: u['displayName'], avatar: u['avatar'], radius: 20),
-                      title: Text(u['displayName'] as String? ?? ''),
-                      subtitle: Text('@${u['username']}'),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        Navigator.pushNamed(context, '/chat', arguments: {
-                          'type': 'direct',
-                          'displayName': u['displayName'],
-                          'avatar': u['avatar'],
-                          'userId': u['id'],
-                        });
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Future<void> _createGroup(BuildContext sheetCtx) async {
     final selected = <int>{};
     final mine = _users.where((u) => u['id'] != _userId).toList();
@@ -281,6 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
             PopupMenuButton<String>(
               onSelected: (v) async {
                 if (v == 'refresh') await _load();
+                if (v == 'group') await _createGroup(context);
                 if (v == 'logout') {
                   await Session.clear();
                   if (!mounted) return;
@@ -289,11 +223,15 @@ class _HomeScreenState extends State<HomeScreen> {
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'refresh', child: Text('Actualiser')),
+                PopupMenuItem(value: 'group', child: Text('Nouveau groupe')),
                 PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
               ],
             ),
             IconButton(
-              onPressed: _newChat,
+              onPressed: () async {
+                await Navigator.pushNamed(context, '/contacts');
+                if (mounted) await _load();
+              },
               icon: const Icon(Icons.edit_outlined),
             ),
           ],
@@ -306,6 +244,14 @@ class _HomeScreenState extends State<HomeScreen> {
               Tab(text: 'Groupes'),
             ],
           ),
+        ),
+        floatingActionButton: FloatingActionButton(
+          tooltip: 'Nouvelle discussion',
+          onPressed: () async {
+            await Navigator.pushNamed(context, '/contacts');
+            if (mounted) await _load();
+          },
+          child: const Icon(Icons.chat_bubble_outline),
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())

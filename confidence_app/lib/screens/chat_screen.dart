@@ -15,7 +15,6 @@ class _ChatScreenState extends State<ChatScreen> {
   final _textCtrl = TextEditingController();
   late final SocketService _socket;
   final List<Message> _messages = [];
-  bool _viewOnce = false;
 
   int get _otherId => widget.otherUser['id'] as int? ?? 0;
   int? get _conversationId => widget.otherUser['conversationId'] as int?;
@@ -71,7 +70,7 @@ class _ChatScreenState extends State<ChatScreen> {
           senderId: ApiService.userId ?? 0,
           type: 'text',
           content: text,
-          viewOnce: _viewOnce,
+          viewOnce: true,
         )));
     _textCtrl.clear();
     final cid = _conversationId;
@@ -80,7 +79,7 @@ class _ChatScreenState extends State<ChatScreen> {
       toUserId: cid == null ? _otherId : null,
       type: 'text',
       content: text,
-      viewOnce: _viewOnce,
+      viewOnce: true,
     );
   }
 
@@ -102,14 +101,14 @@ class _ChatScreenState extends State<ChatScreen> {
             type: 'media',
             mediaId: mediaId,
             mediaUrl: (uploaded['url'] as String?),
-            viewOnce: _viewOnce,
+            viewOnce: true,
           )));
       _socket.sendMessage(
         conversationId: _conversationId,
         toUserId: _conversationId == null ? _otherId : null,
         type: 'media',
         mediaId: mediaId,
-        viewOnce: _viewOnce,
+        viewOnce: true,
       );
     } catch (e) {
       if (!mounted) return;
@@ -215,19 +214,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                   ),
           ),
-          if (_viewOnce)
+          if (true)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               color: Colors.amber.shade100,
               child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.visibility_off, size: 16),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Mode vue unique activé : le message sera détruit après lecture',
+                      'Confidentialité : chaque message est en vue unique et disparaît après lecture.',
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
@@ -243,14 +241,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     icon: const Icon(Icons.image_outlined),
                     tooltip: 'Envoyer une photo',
                     onPressed: _sendMedia,
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      _viewOnce ? Icons.visibility_off : Icons.visibility_outlined,
-                      color: _viewOnce ? Colors.amber : Colors.grey,
-                    ),
-                    tooltip: 'Vue unique',
-                    onPressed: () => setState(() => _viewOnce = !_viewOnce),
                   ),
                   Expanded(
                     child: TextField(

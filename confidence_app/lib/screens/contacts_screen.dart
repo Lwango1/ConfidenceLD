@@ -46,7 +46,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Future<void> _invite(PhoneContact contact) async {
     final phone = contact.phone.replaceAll(RegExp(r'[^0-9]'), '');
     final uri = Uri.parse(
-        'https://wa.me/$phone?text=${Uri.encodeComponent('Installe ConfidenceLD pour discuter en toute confidentialité. Télécharge l\'app ici : https://github.com/Lwango1/ConfidenceLD/releases/latest')}');
+        'https://wa.me/$phone?text=${Uri.encodeComponent('Installe ConfidenceLD pour discuter en toute confidentialité. Télécharge l\'app : https://github.com/Lwango1/ConfidenceLD/releases/latest/download/ConfidenceLD.apk')}');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 

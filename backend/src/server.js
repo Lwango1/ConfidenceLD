@@ -45,11 +45,6 @@ app.post("/api/register", async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: "username et password requis" });
     }
-    if (!phone) {
-      return res
-        .status(400)
-        .json({ error: "Le numéro de téléphone est requis (comme WhatsApp)" });
-    }
     const user = await db.createUser(username, password, displayName || username, phone);
     const token = auth.sign({ id: user.id, username: user.username });
     res.json({

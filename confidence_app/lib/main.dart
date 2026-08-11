@@ -3,7 +3,10 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/contacts_screen.dart';
+import 'screens/call_screens.dart';
 import 'services/session.dart';
+
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +23,7 @@ class ConfidenceLDApp extends StatelessWidget {
     return MaterialApp(
       title: 'ConfidenceLD',
       debugShowCheckedModeBanner: false,
+      navigatorKey: rootNavigatorKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF2C5364),
@@ -38,6 +42,18 @@ class ConfidenceLDApp extends StatelessWidget {
         if (settings.name == '/chat') {
           final args = settings.arguments as Map<String, dynamic>;
           return MaterialPageRoute(builder: (_) => ChatScreen(otherUser: args));
+        }
+        if (settings.name == '/call') {
+          final args = settings.arguments as Map<String, dynamic>;
+          return MaterialPageRoute(
+              fullscreenDialog: true, builder: (_) => ActiveCallScreen(
+                    callId: args['callId'] as String,
+                    peerId: args['peerId'] as int,
+                    displayName: args['displayName'] as String,
+                    avatar: args['avatar'] as String?,
+                    isVideo: args['isVideo'] == true,
+                    initiatedByMe: args['initiatedByMe'] == true,
+                  ));
         }
         return null;
       },

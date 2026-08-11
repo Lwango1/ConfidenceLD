@@ -1,5 +1,24 @@
 function createSockets(io, db, auth, config) {
   const usersById = new Map();
+  const userInCall = new Map();
+  const activeCalls = new Map();
+
+  function endCallForUser(uid, callId) {
+    const call = activeCalls.get(callId);
+    if (!call) return;
+    for (const m of [call.caller, call.callee]) {
+      if (userInCall.get(m) === callId) userInCall.delete(m);
+    }
+    activeCalls.delete(callId);
+  }
+
+  function findPeer(callId, uid) {
+    const call = activeCalls.get(callId);
+    if (!call) return null;
+    if (call.caller === uid) return call.callee;
+    if (call.callee === uid) return call.caller;
+    return null;
+  }
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
@@ -17,6 +36,75 @@ function createSockets(io, db, auth, config) {
     usersById.set(userId, socket.user);
     socket.join(`user:${userId}`);
     console.log(`Connecté : ${socket.user.username} (socket ${socket.id})`);
+
+    function endCallForUser(uid, callId) {
+      if (activeCalls.get(uid) === callId) activeCalls.delete(uid);
+      if (activeCalls.get(callId) === uid) activeCalls.delete(callId);
+    }
+
+    socket.on("call:offer", async ({ toUserId, callId, isVideo }, callback) => {
+      try {
+        const targetOnline = io.sockets.adapter.rooms.has(`user:${toUserId}`)
+          && io.sockets.adapter.rooms.get(`user:${toUserId}`).size > 0;
+        if (!targetOnline) {
+          return callback && callback({ ok: false, error: "offline" });
+        }
+        if (userInCall.get(toUserId) || userInCall.get(userId) || activeCalls.get(callId)) {
+          return callback && callback({ ok: false, error: "busy" });
+        }
+        activeCalls.set(callId, { caller: userId, callee: toUserId });
+        userInCall.set(userId, callId);
+        userInCall.set(toUserId, callId);
+        const caller = await db.getUserById(userId);
+        io.to(`user:${toUserId}`).emit("call:incoming", {
+          callId,
+          fromUserId: userId,
+          isVideo,
+          fromDisplayName: caller ? caller.displayName : "Utilisateur",
+          fromAvatar: caller ? caller.avatar : null,
+        });
+        if (callback) callback({ ok: true });
+      } catch (e) {
+        if (callback) callback({ ok: false, error: e.message });
+      }
+    });
+
+    socket.on("call:accept", ({ callId, toUserId }, callback) => {
+      if (findPeer(callId, userId) !== toUserId) {
+        return callback && callback({ ok: false, error: "Appel introuvable" });
+      }
+      io.to(`user:${toUserId}`).emit("call:accepted", { callId });
+      if (callback) callback({ ok: true });
+    });
+
+    socket.on("call:reject", ({ callId, toUserId }, callback) => {
+      io.to(`user:${toUserId}`).emit("call:rejected", { callId });
+      endCallForUser(userId, callId);
+      endCallForUser(toUserId, callId);
+      if (callback) callback({ ok: true });
+    });
+
+    socket.on("call:signal", ({ callId, toUserId, signal }, callback) => {
+      if (findPeer(callId, userId) !== toUserId) {
+        return callback && callback({ ok: false, error: "Appel introuvable" });
+      }
+      io.to(`user:${toUserId}`).emit("call:signal", { callId, fromUserId: userId, signal });
+      if (callback) callback({ ok: true });
+    });
+
+    socket.on("call:end", ({ callId, toUserId }, callback) => {
+      io.to(`user:${toUserId}`).emit("call:ended", { callId });
+      endCallForUser(userId, callId);
+      endCallForUser(toUserId, callId);
+      if (callback) callback({ ok: true });
+    });
+
+    socket.on("call:busy", ({ callId, toUserId }, callback) => {
+      io.to(`user:${toUserId}`).emit("call:busy", { callId });
+      endCallForUser(userId, callId);
+      endCallForUser(toUserId, callId);
+      if (callback) callback({ ok: true });
+    });
 
     socket.on("conversations:list", async (callback) => {
       try {
@@ -104,6 +192,12 @@ function createSockets(io, db, auth, config) {
 
     socket.on("disconnect", () => {
       usersById.delete(userId);
+      const callId = userInCall.get(userId);
+      if (callId) {
+        const peer = findPeer(callId, userId);
+        if (peer) io.to(`user:${peer}`).emit("call:ended", { callId });
+        endCallForUser(userId, callId);
+      }
     });
   });
 

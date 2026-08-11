@@ -91,12 +91,14 @@ async function init() {
   console.log("Base de données PostgreSQL initialisée");
 }
 
+function localDigits(phone) {
+  let p = String(phone || "").replace(/[^\d]/g, "");
+  if (p.startsWith("00")) p = p.slice(2);
+  return p.startsWith("0") ? p.slice(1) : p;
+}
+
 async function normalizePhone(phone) {
-  let p = String(phone || "").replace(/[^\d+]/g, "");
-  if (p.startsWith("+")) return p;
-  if (p.startsWith("00")) return "+" + p.slice(2);
-  if (p.startsWith("0") && p.length >= 10) return "+243" + p.slice(1);
-  return p;
+  return localDigits(phone);
 }
 
 async function createUser(username, password, displayName, phone) {
@@ -149,20 +151,34 @@ async function getUserById(userId) {
 }
 
 async function matchContacts(phoneNumbers) {
-  const normalized = [];
+  const candidates = [];
   for (const p of phoneNumbers) {
-    const n = await normalizePhone(p);
-    if (n && !normalized.includes(n)) normalized.push(n);
+    const l = await normalizePhone(p);
+    if (l.length >= 6 && !candidates.includes(l)) candidates.push(l);
   }
-  const stripped = normalized.map((n) => n.replace(/^\+/, ""));
-  const all = [...normalized, ...stripped];
-  if (all.length === 0) return [];
-  const placeholders = all.map((_, i) => `$${i + 1}`).join(",");
+  if (candidates.length === 0) return [];
+
   const res = await query(
-    `SELECT DISTINCT id, username, display_name as "displayName", phone, avatar FROM users WHERE phone IN (${placeholders})`,
-    all
+    'SELECT id, username, display_name as "displayName", phone, avatar FROM users WHERE phone IS NOT NULL AND length(phone) > 0'
   );
-  return res.rows;
+
+  const matched = [];
+  const used = new Array(candidates.length).fill(false);
+  for (const row of res.rows) {
+    const userLocal = await normalizePhone(row.phone);
+    if (userLocal.length < 6) continue;
+    for (let i = 0; i < candidates.length; i++) {
+      if (used[i]) continue;
+      const shorter = candidates[i].length <= userLocal.length ? candidates[i] : userLocal;
+      const longer = candidates[i].length <= userLocal.length ? userLocal : candidates[i];
+      if (shorter.length >= 6 && longer.endsWith(shorter)) {
+        matched.push(row);
+        used[i] = true;
+        break;
+      }
+    }
+  }
+  return matched;
 }
 
 /* ============ CONVERSATIONS ============ */

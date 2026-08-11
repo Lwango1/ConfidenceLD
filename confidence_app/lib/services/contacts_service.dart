@@ -14,6 +14,12 @@ class PhoneContact {
   });
 }
 
+String _localDigits(String phone) {
+  var d = phone.replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.startsWith('00')) d = d.substring(2);
+  return d.startsWith('0') ? d.substring(1) : d;
+}
+
 class ContactsService {
   static Future<bool> ensurePermission() async {
     final granted = await ph.Permission.contacts.request().isGranted;
@@ -49,17 +55,19 @@ class ContactsService {
     try {
       final matching = await ApiService.matchContacts(phones);
       final matches = matching['matches'] as List<dynamic>? ?? [];
-      final userByPhone = <String, Map<String, dynamic>>{};
-      for (final m in matches) {
-        final map = (m as Map).cast<String, dynamic>();
-        final phone = (map['phone'] as String? ?? '').replaceAll('+', '');
-        userByPhone[phone] = map;
-      }
+      final matchUsers =
+          matches.map((m) => (m as Map).cast<String, dynamic>()).toList();
       for (final c in contacts) {
-        final stripped = c.phone.replaceAll(RegExp(r'[^0-9]'), '');
-        final match = userByPhone[stripped];
-        if (match != null) {
-          c.matchedUser = match;
+        final can = _localDigits(c.phone);
+        if (can.length < 6) continue;
+        for (final u in matchUsers) {
+          final uLocal = _localDigits(u['phone'] as String? ?? '');
+          final shorter = can.length <= uLocal.length ? can : uLocal;
+          final longer = can.length <= uLocal.length ? uLocal : can;
+          if (shorter.length >= 6 && longer.endsWith(shorter)) {
+            c.matchedUser = u;
+            break;
+          }
         }
       }
     } catch (_) {}

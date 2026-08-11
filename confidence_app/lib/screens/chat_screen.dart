@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
+import '../main.dart';
 
 class ChatScreen extends StatefulWidget {
   final Map<String, dynamic> otherUser;
@@ -59,6 +60,18 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(() => _messages.add(msg));
     }
+  }
+
+  void _startCall(bool isVideo) {
+    if (widget.otherUser['type'] == 'group') return;
+    Navigator.pushNamed(rootNavigatorKey.currentContext!, '/call', arguments: {
+      'callId': '${DateTime.now().millisecondsSinceEpoch}_${ApiService.userId}',
+      'peerId': _otherId,
+      'displayName': widget.otherUser['displayName'] as String? ?? '',
+      'avatar': widget.otherUser['avatar'] as String?,
+      'isVideo': isVideo,
+      'initiatedByMe': true,
+    });
   }
 
   void _sendText() {
@@ -163,6 +176,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isGroup = widget.otherUser['type'] == 'group';
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -188,13 +202,27 @@ class _ChatScreenState extends State<ChatScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (widget.otherUser['type'] == 'group')
+            if (isGroup)
               const Padding(
                 padding: EdgeInsets.only(left: 6),
                 child: Icon(Icons.group, size: 18),
               ),
           ],
         ),
+        actions: [
+          if (!isGroup) ...[
+            IconButton(
+              tooltip: 'Appel vocal',
+              onPressed: () => _startCall(false),
+              icon: const Icon(Icons.call),
+            ),
+            IconButton(
+              tooltip: 'Appel vidéo',
+              onPressed: () => _startCall(true),
+              icon: const Icon(Icons.videocam),
+            ),
+          ],
+        ],
       ),
       body: Column(
         children: [

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/session.dart';
 import '../services/update_service.dart';
+import '../services/call_service.dart';
+import '../main.dart';
+import 'call_screens.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,6 +25,25 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _load();
     _checkUpdate();
+    _setupCalls();
+  }
+
+  void _setupCalls() {
+    final svc = CallService.instance;
+    svc.init();
+    svc.onIncomingCall = (call) {
+      if (!mounted) return;
+      Navigator.of(rootNavigatorKey.currentContext!).push(MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => IncomingCallScreen(
+          callId: call.callId,
+          fromUserId: call.fromUserId,
+          displayName: call.fromDisplayName,
+          avatar: call.fromAvatar,
+          isVideo: call.isVideo,
+        ),
+      ));
+    };
   }
 
   Future<void> _checkUpdate() async {

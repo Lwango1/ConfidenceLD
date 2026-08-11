@@ -20,6 +20,7 @@ dependencies:
   permission_handler: ">=13.0.0 <14.0.0"
   url_launcher: ^6.3.2
   flutter_contacts: ^2.1.0
+  flutter_webrtc: ^0.12.3
 
 dev_dependencies:
   flutter_test:

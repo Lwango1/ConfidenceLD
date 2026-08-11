@@ -99,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _phoneCtrl,
                     keyboardType: TextInputType.phone,
                     style: const TextStyle(color: Colors.white),
-                    decoration: _input('Numéro de téléphone (ex: +243...)'),
+                    decoration: _input('Numéro de téléphone (optionnel, sans indicatif)'),
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -196,7 +196,6 @@ class _LoginScreenState extends State<LoginScreen> {
         final display = _displayCtrl.text.trim();
         final phone = _phoneCtrl.text.trim();
         if (display.isEmpty) throw Exception('Entrez votre nom affiché');
-        if (phone.isEmpty) throw Exception('Le numéro est requis (comme WhatsApp)');
         data = await ApiService.register(
           username: username,
           password: password,
